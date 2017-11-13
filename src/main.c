@@ -35,6 +35,7 @@ int main(void)
 
 	//nit_LCD();
 	i2c_init();
+	Timer5Init();
 	Timer3Init();
 	Timer4Init();
 	send_lcd_size("_asd_vanya_boom_boom_boom_sd_asd_lkg_asdlk", strlen("_asd_vanya_boom_boom_boom_sd_asd_lkg_asdlk"));

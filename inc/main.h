@@ -69,6 +69,7 @@ typedef enum {
 	MODE_7,
 	MODE_8
 } i2c_Mode;
+
 typedef enum {
 	MODE_WAIT,
 	MODE_TRANSFORM,
@@ -79,6 +80,15 @@ typedef enum{
 	CLR,
 	HOME
 } LCD_Mode;
+
+typedef enum{
+	CHECK,
+	CLEAR,
+	NOT_VALID,
+	VALID
+} DMA_UART_Rec;
+
+volatile DMA_UART_Rec rec_uart_mode = CHECK;
 
 LCD_Mode lcd_mode;
 
@@ -91,17 +101,6 @@ extern tx_Mode mode;
 volatile i2c_Mode i2c_mode;
 volatile tim4_Mode tim4_mode;
 uint8_t transform=0;
-
-/*
-typedef enum {
-	STATE_BAR_INI,				//Инициализация барометра
-	STATE_ESP_INI,				//Инициализация ESP
-	STATE_SYSCLK_INI,			//Инициализация системного таймера
-	STATE_TX,					//Отправка команды/данных
-	STATE_IDLE,					//Ожидание
-	STATE_RX,					//Прием команды/данных
-	STATE_ERR					//Ошибка отправки данных/команды
-} Tx_state;*/
 
 #define buffer_size 200
 
@@ -181,7 +180,6 @@ void SysTick_Handler(void){
 	if(delay_count) delay_count--;
 	if(i2c_delay) i2c_delay--;
 }
-
 
 //------------------------------------------------------
 // Delay_ms()
@@ -431,24 +429,7 @@ void TimerInit(void){
 	//__WFI();	//Установка режима Sleep
 }
 
-uint8_t check_data(){
-	if(1)
-		return 1;
-	else 0;
-}
 
-void generate_error(){
-	memcpy(send_buffer, " ERROR ", send_buff_size);
-}
-
-void send_to_lcd(){
-	int8_t sizeSendData = strlen(send_buffer);
-	//memcpy(bufferDMAUSARTSend, send_buffer, sizeSendData);
-	/**
-	 * TODO: change dma
-	 */
-	DMA_Cmd(DMA1_Stream6, ENABLE);
-}
 //------------------------------------------------------
 // TIM2_IRQHandler()
 //------------------------------------------------------
@@ -544,13 +525,11 @@ void SendDataUART2(char *SendData)
 }
 
 
-static const uint8_t bufferSizeDMAUSARTReceive  = 100;
+static const uint8_t bufferSizeDMAUSARTReceive  = 25;
 
-char bufferDMAUSARTReceive[100] = {0};
+char bufferDMAUSARTReceive[25] = {0};
 
-// Статус полученных данных
 int8_t receiveDataStatus = 0;
-
 
 void DMAUSART2Init_Receive(void)
 {
@@ -592,7 +571,80 @@ void DMAUSART2Init_Receive(void)
 void ClearReceiveData()
 {
     memset(&bufferDMAUSARTReceive, '\0', sizeof(bufferDMAUSARTReceive)+1);
-    receiveDataStatus = 0;
+}
+
+void generate_error(){
+	memcpy(transformed, " Not valid data!", 16);
+	rec_uart_mode = CLEAR;
+	transformed[16]=0;
+	TIM_Cmd(TIM4, ENABLE);
+	TIM_ITConfig(TIM4, TIM_IT_Update, ENABLE);
+}
+
+void Timer5Init(void){
+	RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM5, ENABLE);
+
+	RCC_ClocksTypeDef freqs;
+	RCC_GetClocksFreq(&freqs);
+	uint32_t TimerPrescaler = freqs.PCLK1_Frequency / 1000;
+
+	TIM_TimeBaseInitTypeDef timer;
+	TIM_TimeBaseStructInit(&timer);
+
+	timer.TIM_ClockDivision = TIM_CKD_DIV1;
+	timer.TIM_CounterMode 	= TIM_CounterMode_Up;
+	timer.TIM_Prescaler		= TimerPrescaler - 1;
+	timer.TIM_Period		= 10; //2000;
+	TIM_TimeBaseInit(TIM5, &timer);
+
+	NVIC_EnableIRQ(TIM5_IRQn);
+	//NVIC_SystemLPConfig(NVIC_LP_SLEEPONEXIT, ENABLE);	//Возврат в режим Sleep после завершения обработчика прерывания
+	//__WFI();	//Установка режима Sleep
+}
+
+uint8_t i = 0;
+uint8_t same = 0;
+volatile char checked[] = "US";
+uint8_t size_checked = 2;
+
+void TIM5_IRQHandler(){
+	if (TIM_GetITStatus(TIM5, TIM_IT_Update) != RESET) {
+			TIM_ClearITPendingBit(TIM5, TIM_IT_Update);
+			if(rec_uart_mode == CHECK){
+				if(bufferDMAUSARTReceive[i] == checked[same]){
+					same++;
+					if(same == size_checked){
+						rec_uart_mode = VALID;
+					}
+				}else{
+					same = 0;
+				}
+				i++;
+				if(bufferSizeDMAUSARTReceive == i)
+					rec_uart_mode = NOT_VALID;
+			}
+			if(rec_uart_mode == VALID){
+				memcpy(transformed, bufferDMAUSARTReceive, bufferSizeDMAUSARTReceive);
+				transformed[bufferSizeDMAUSARTReceive]=0;
+				rec_uart_mode = CLEAR;
+			}
+			if(rec_uart_mode == NOT_VALID){
+				memcpy(transformed, " ERROOR not valid data ", 24);
+				transformed[24]=0;
+				rec_uart_mode = CLEAR;
+			}
+			if(rec_uart_mode == CLEAR){
+				TIM_Cmd(TIM4, ENABLE);
+				TIM_ITConfig(TIM4, TIM_IT_Update, ENABLE);
+				memset(&bufferDMAUSARTReceive, '\0', bufferSizeDMAUSARTReceive);
+				rec_uart_mode = CHECK;
+				i = 0;
+				same = 0;
+				TIM_Cmd(TIM5, DISABLE);
+				TIM_ITConfig(TIM5, TIM_IT_Update, DISABLE);
+				DMA_Cmd(DMA1_Stream5, ENABLE);
+			}
+	}
 }
 
 // Прерывание DMA1_Stream5
@@ -602,10 +654,11 @@ void DMA1_Stream5_IRQHandler(void)
   {
     DMA_ClearITPendingBit(DMA1_Stream5, DMA_IT_TCIF5);
   	lcd_mode = HOME;
-    send_lcd_size(bufferDMAUSARTReceive, 20);
-    //send_str_to_lcd(bufferDMAUSARTReceive);
-    ClearReceiveData();
-    DMA_Cmd(DMA1_Stream5, ENABLE);
+  	memcpy(checked, "US", 3);
+  	size_checked = 2;
+    //send_lcd_size(bufferDMAUSARTReceive, 20);
+  	TIM_Cmd(TIM5, ENABLE);
+  	TIM_ITConfig(TIM5, TIM_IT_Update, ENABLE);
   }
 }
 
