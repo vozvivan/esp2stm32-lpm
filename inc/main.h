@@ -717,12 +717,12 @@ void TIM4_IRQHandler(){
 					if(lcd_mode == CLR){
 						tx_buffer[0] = 0b00001100;
 						tx_buffer[1]= 0b00011100;
-						transform = 2;
+						transform = 1;
 					}
 					if(lcd_mode == HOME){
 						tx_buffer[0] = 0b00001100;
 						tx_buffer[1]= 0b00111100;
-						transform = 2;
+						transform = 1;
 					}
 				}
 			}
@@ -737,8 +737,8 @@ void TIM4_IRQHandler(){
 					TIM_ITConfig(TIM3, TIM_IT_Update, ENABLE);
 					return;
 				}
-				tx_buffer[2*transform] = (get_lcd_embd_h(transformed[transform]) << 4) + 0b1101;
-				tx_buffer[2*transform+1] = (get_lcd_embd_l(transformed[transform]) << 4) + 0b1101;
+				tx_buffer[2*transform] = (get_lcd_embd_h(transformed[transform - (lcd_mode != NONE)]) << 4) + 0b1101;
+				tx_buffer[2*transform+1] = (get_lcd_embd_l(transformed[transform - (lcd_mode != NONE)]) << 4) + 0b1101;
 				transform++;
 			}
 	}
