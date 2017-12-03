@@ -71,7 +71,7 @@
  */
 #define		TOP_ROOM		"AT+CWJAP=\"TOP_ROOM\",\"mkoldA1991\"\r\n"
 
-#define		MARAT		"AT+CWJAP=\"Marat\",\"12345678\"\r\n"
+#define		MARAT		"AT+CWJAP=\"Marat\",\"87654321\"\r\n"
 
 /*
  * ***************************************************************************

@@ -32,7 +32,7 @@ int main(void)
 	GPIO_Init(GPIOD, &gpio);
 	GPIO_SetBits(GPIOD, GPIO_Pin_12);
 	SysTick_Config(SystemCoreClock/1000); //3
-
+	ButEXTI_Init();
 	//nit_LCD();
 	i2c_init();
 	Timer5Init();

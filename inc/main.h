@@ -85,7 +85,10 @@ typedef enum{
 	CHECK,
 	CLEAR,
 	NOT_VALID,
-	VALID
+	VALID,
+	PRESS,
+	TEMP,
+	CHECK_SUM
 } DMA_UART_Rec;
 
 volatile DMA_UART_Rec rec_uart_mode = CHECK;
@@ -370,29 +373,33 @@ int ESPStart(){
 	char ans[20] = {0};
 	switch (cmd_num++) {
 		case 0:
-			//clr_send_s_lcd(" AT CWMODE 3 ");
+			//1
 			SendDataUART2(ATCWMODE3);
 			memcpy(send_str, ATCWMODE3, strlen(ATCWMODE3));
-			//USART_Send();
 			break;
 		case 1:
-			//clr_send_s_lcd(" AT CIPMODE 0 ");
 			SendDataUART2(ATECIPMODE0);
 			memcpy(send_str, ATECIPMODE0, strlen(ATECIPMODE0));
-			//USART_Send();
 			break;
 		case 2:
-			//clr_send_s_lcd(" AT CIPMUX 1 ");
+
 			SendDataUART2(ATCIPMUX1);
 			memcpy(send_str, ATCIPMUX1, strlen(ATCIPMUX1));
-			//USART_Send();
+
 			break;
 		case 3:
-			//clr_send_s_lcd(" AT CIPSERVER 1 88 ");
+
 			SendDataUART2(ATCIPSERVER);
 			memcpy(send_str, ATCIPSERVER, strlen(ATCIPSERVER));
-			//USART_Send();
-			//clr_send_s_lcd(" wait for data ");
+			mode  = MODE_INIT_ESP_END;
+
+
+			//SendDataUART2(MARAT);
+			//memcpy(send_str, MARAT, strlen(MARAT));
+			break;
+		case 4:
+			SendDataUART2(ATCIPSERVER);
+			memcpy(send_str, ATCIPSERVER, strlen(ATCIPSERVER));
 			mode  = MODE_INIT_ESP_END;
 			break;
 		default:
@@ -417,7 +424,7 @@ void TimerInit(void){
 	timer.TIM_ClockDivision = TIM_CKD_DIV1;
 	timer.TIM_CounterMode 	= TIM_CounterMode_Up;
 	timer.TIM_Prescaler		= TimerPrescaler - 1;
-	timer.TIM_Period		= 1000; //2000;
+	timer.TIM_Period		= 100; //2000;
 	TIM_TimeBaseInit(TIM2, &timer);
 
 	NVIC_EnableIRQ(TIM2_IRQn);
@@ -466,12 +473,12 @@ void TIM2_IRQHandler(void){
 
 
 // Размер буфера для получения данных по DMA, через UART2
-static const uint8_t bufferSizeDMAUSARTSend = 20;
+static const uint8_t bufferSizeDMAUSARTSend = 30;
 
 //#define bufferSizeDMAUSARTSend 100;
 
 // Буфер для отправки данных по DMA, через UART2
-char bufferDMAUSARTSend[20];
+char bufferDMAUSARTSend[30];
 
 // Инициализация DMA (DMA1_Channel_4_Stream6) для USRT2 на отправку данных
 void DMAUSART2Init(void)
@@ -547,9 +554,11 @@ void DMAUSART2Init_Receive(void)
     DMA_Init_USART.DMA_MemoryInc = DMA_MemoryInc_Enable;
     DMA_Init_USART.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
     DMA_Init_USART.DMA_MemoryDataSize = DMA_MemoryDataSize_Byte;
-    DMA_Init_USART.DMA_Mode = DMA_Mode_Circular;
+    // TODO:
+    //
+    DMA_Init_USART.DMA_Mode =DMA_Mode_Circular;//DMA_Mode_Normal;//
     DMA_Init_USART.DMA_Priority = DMA_Priority_High;
-    DMA_Init_USART.DMA_FIFOMode = DMA_FIFOMode_Disable;
+    DMA_Init_USART.DMA_FIFOMode = DMA_FIFOMode_Disable;//DMA_FIFOMode_Enable;//
     DMA_Init_USART.DMA_FIFOThreshold = DMA_FIFOThreshold_Full;
     DMA_Init_USART.DMA_MemoryBurst = DMA_MemoryBurst_Single;
     DMA_Init_USART.DMA_PeripheralBurst = DMA_PeripheralBurst_Single;
@@ -594,7 +603,7 @@ void Timer5Init(void){
 	timer.TIM_ClockDivision = TIM_CKD_DIV1;
 	timer.TIM_CounterMode 	= TIM_CounterMode_Up;
 	timer.TIM_Prescaler		= TimerPrescaler - 1;
-	timer.TIM_Period		= 10; //2000;
+	timer.TIM_Period		= 30; //2000;
 	TIM_TimeBaseInit(TIM5, &timer);
 
 	NVIC_EnableIRQ(TIM5_IRQn);
@@ -604,8 +613,11 @@ void Timer5Init(void){
 
 uint8_t i = 0;
 uint8_t same = 0;
-volatile char checked[] = "US";
-uint8_t size_checked = 2;
+volatile char checked[] = "IPD,";
+uint8_t size_checked = 3;
+volatile uint8_t size_press = 0;
+volatile uint8_t size_temp = 0;
+volatile uint8_t check_s = 0;
 
 void TIM5_IRQHandler(){
 	if (TIM_GetITStatus(TIM5, TIM_IT_Update) != RESET) {
@@ -624,9 +636,30 @@ void TIM5_IRQHandler(){
 					rec_uart_mode = NOT_VALID;
 			}
 			if(rec_uart_mode == VALID){
-				memcpy(transformed, bufferDMAUSARTReceive, bufferSizeDMAUSARTReceive);
-				transformed[bufferSizeDMAUSARTReceive]=0;
+				/*char size = bufferDMAUSARTReceive[i];
+				size_press  = size >> 4;
+				size_temp = size & 11110000;
+				memcpy(transformed, bufferDMAUSARTReceive[i+1], size_press);
+				memcpy(transformed[size_press], " ", 1);
+				memcpy(transformed, bufferDMAUSARTReceive[i+2+size_press], size_temp);*/
+				memcpy(transformed, bufferDMAUSARTReceive+i+6, bufferSizeDMAUSARTReceive-i-7);
+				memcpy(transformed+bufferSizeDMAUSARTReceive-i-7, bufferDMAUSARTReceive, i-size_checked);
+
+				//transformed[size_press + size_temp + 1]=0;
+				transformed[bufferSizeDMAUSARTReceive-i]=0;
 				rec_uart_mode = CLEAR;
+				//rec_uart_mode = CHECK_SUM;
+			}
+			if(rec_uart_mode == CHECK_SUM){
+				check_s ^= bufferDMAUSARTReceive[i+1];
+				i++;
+				if(i == bufferSizeDMAUSARTReceive-1){
+					if(check_s != bufferDMAUSARTReceive[i])
+						rec_uart_mode = CLEAR;
+					else
+						rec_uart_mode = NOT_VALID;
+					check_s = 0;
+				}
 			}
 			if(rec_uart_mode == NOT_VALID){
 				memcpy(transformed, " ERROOR not valid data ", 24);
@@ -637,12 +670,22 @@ void TIM5_IRQHandler(){
 				TIM_Cmd(TIM4, ENABLE);
 				TIM_ITConfig(TIM4, TIM_IT_Update, ENABLE);
 				memset(&bufferDMAUSARTReceive, '\0', bufferSizeDMAUSARTReceive);
+				//rec_uart_mode = CHECK;
+				//TODO::
 				rec_uart_mode = CHECK;
+				//
 				i = 0;
 				same = 0;
 				TIM_Cmd(TIM5, DISABLE);
 				TIM_ITConfig(TIM5, TIM_IT_Update, DISABLE);
+				//DMA_ClearFlag(DMA1_Stream5, DMA_FLAG_TCIF5| DMA_FLAG_FEIF5|	DMA_FLAG_DMEIF5| DMA_FLAG_TEIF5| DMA_FLAG_HTIF5);
+				//USART_DMACmd(USART2, USART_DMAReq_Rx, ENABLE);
+				//DMA_DeInit(DMA1_Stream5);
 				DMA_Cmd(DMA1_Stream5, ENABLE);
+
+				//DMA_ITConfig(DMA1_Stream5, DMA_IT_TC, ENABLE);
+				//DMAUSART2Init_Receive();
+
 			}
 	}
 }
@@ -653,9 +696,12 @@ void DMA1_Stream5_IRQHandler(void)
   if (DMA_GetITStatus(DMA1_Stream5, DMA_IT_TCIF5) == SET)
   {
     DMA_ClearITPendingBit(DMA1_Stream5, DMA_IT_TCIF5);
-  	lcd_mode = HOME;
-  	memcpy(checked, "US", 3);
-  	size_checked = 2;
+  	lcd_mode = CLR;
+  	memcpy(checked, "IPD,", 4);
+  	size_checked = 3;
+  	//TODO:::!!!!
+  	rec_uart_mode = CHECK;
+  	// !!!
     //send_lcd_size(bufferDMAUSARTReceive, 20);
   	TIM_Cmd(TIM5, ENABLE);
   	TIM_ITConfig(TIM5, TIM_IT_Update, ENABLE);
@@ -958,12 +1004,53 @@ void I2C_Config(void)
   //I2C_Cmd(I2Cx, ENABLE);
 }
 
+void ButEXTI_Init(void)
+{
+	// Clock for GPIOA
+	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA, ENABLE);
+	// Clock for SYSCFG
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SYSCFG, ENABLE);
+	// GPIOA initialization as an input from user button (GPIOA0)
+	GPIO_InitTypeDef GPIO_InitStruct;
+	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_IN;
+	GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
+	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_0;
+	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_DOWN;
+	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_2MHz;
+	GPIO_Init(GPIOA, &GPIO_InitStruct);
+	// Selects the GPIOA pin 0 used as external interrupt source
+	SYSCFG_EXTILineConfig(EXTI_PortSourceGPIOA, EXTI_PinSource0);
+	// External interrupt settings
+	EXTI_InitTypeDef EXTI_InitStruct;
+	EXTI_InitStruct.EXTI_Line = EXTI_Line0;
+	EXTI_InitStruct.EXTI_LineCmd = ENABLE;
+	EXTI_InitStruct.EXTI_Mode = EXTI_Mode_Interrupt;
+	EXTI_InitStruct.EXTI_Trigger = EXTI_Trigger_Rising;
+	EXTI_Init(&EXTI_InitStruct);
+	// Nested vectored interrupt settings
+	NVIC_InitTypeDef NVIC_InitStruct;
+	NVIC_InitStruct.NVIC_IRQChannel = EXTI0_IRQn;
+	NVIC_InitStruct.NVIC_IRQChannelCmd = ENABLE;
+	// EXTI0_IRQn has Most important interrupt
+	NVIC_InitStruct.NVIC_IRQChannelPreemptionPriority = 0x00;
+	NVIC_InitStruct.NVIC_IRQChannelSubPriority = 0x00;
+	NVIC_Init(&NVIC_InitStruct);
 
+}
+void EXTI0_IRQHandler(void)
+{
+	if (EXTI_GetITStatus(EXTI_Line0))
+	{
+		GPIO_ToggleBits(GPIOD, GPIO_Pin_13);
+		EXTI_ClearITPendingBit(EXTI_Line0);
+	}
+}
 // uart dma
 // http://forum.amperka.ru/threads/stm32f4discovery-uart-dma.3852/
 
 // dma to i2c
 // https://github.com/g4lvanix/STM32F4-workarea/blob/master/Project/STM32F4xx_StdPeriph_Examples/I2C/I2C_TwoBoards/I2C_DataExchangeDMA/main.c
+
 
 
 #endif /* MAIN_H_ */
