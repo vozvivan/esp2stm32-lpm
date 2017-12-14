@@ -88,12 +88,17 @@ typedef enum{
 	VALID,
 	PRESS,
 	TEMP,
-	CHECK_SUM
+	CHECK_SUM,
+	CONNECTED,
+	WAIT
 } DMA_UART_Rec;
 
 volatile DMA_UART_Rec rec_uart_mode = CHECK;
 
 LCD_Mode lcd_mode;
+
+volatile uint8_t packet_struct = 0;
+
 
 //Extern values from main.c
 char send_str[40] = {0};
@@ -104,6 +109,8 @@ extern tx_Mode mode;
 volatile i2c_Mode i2c_mode;
 volatile tim4_Mode tim4_mode;
 uint8_t transform=0;
+
+uint8_t acknowledge_packet[4] = {0xff, 0x08, 0xff ^ 0x08, 0};
 
 #define buffer_size 200
 
@@ -133,6 +140,7 @@ uint8_t transformed[256] = {0};
 uint8_t size_tx_buff = 14;
 
 uint8_t aRxBuffer [256];
+
 
 //------------------------------------------------------
 // USART2_IRQHandler()
@@ -389,18 +397,24 @@ int ESPStart(){
 			break;
 		case 3:
 
-			SendDataUART2(ATCIPSERVER);
-			memcpy(send_str, ATCIPSERVER, strlen(ATCIPSERVER));
-			mode  = MODE_INIT_ESP_END;
+			//SendDataUART2(ATCIPSERVER);
+			//memcpy(send_str, ATCIPSERVER, strlen(ATCIPSERVER));
+			//mode  = MODE_INIT_ESP_END;
 
 
-			//SendDataUART2(MARAT);
+			SendDataUART2(MARAT);
 			//memcpy(send_str, MARAT, strlen(MARAT));
 			break;
-		case 4:
+		case 5:
 			SendDataUART2(ATCIPSERVER);
 			memcpy(send_str, ATCIPSERVER, strlen(ATCIPSERVER));
 			mode  = MODE_INIT_ESP_END;
+			break;
+		case 4:
+
+			SendDataUART2("AT+CIFSR\r\n");
+			memcpy(send_str, ATCIPSERVER, strlen(ATCIPSERVER));
+			//mode  = MODE_INIT_ESP_END;
 			break;
 		default:
 			return 0;
@@ -424,7 +438,7 @@ void TimerInit(void){
 	timer.TIM_ClockDivision = TIM_CKD_DIV1;
 	timer.TIM_CounterMode 	= TIM_CounterMode_Up;
 	timer.TIM_Prescaler		= TimerPrescaler - 1;
-	timer.TIM_Period		= 100; //2000;
+	timer.TIM_Period		= 20000; //2000;
 	TIM_TimeBaseInit(TIM2, &timer);
 
 	NVIC_EnableIRQ(TIM2_IRQn);
@@ -445,7 +459,7 @@ void TIM2_IRQHandler(void){
 		TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
 		if (mode == MODE_ESP_START && !str_tx_busy) {
 			//i2c_delay = READ_I2C_DATA_DELAY_MS;
-			if (cmd_num == 4) return;
+			if (cmd_num == 6) return;
 			ESPStart();
 		} if (mode == MODE_INIT_ESP_END){
 			TIM_ITConfig(TIM2, TIM_IT_Update, DISABLE);
@@ -532,9 +546,9 @@ void SendDataUART2(char *SendData)
 }
 
 
-static const uint8_t bufferSizeDMAUSARTReceive  = 25;
+static const uint8_t bufferSizeDMAUSARTReceive  = 27;//17
 
-char bufferDMAUSARTReceive[25] = {0};
+char bufferDMAUSARTReceive[30] = {0};
 
 int8_t receiveDataStatus = 0;
 
@@ -613,11 +627,90 @@ void Timer5Init(void){
 
 uint8_t i = 0;
 uint8_t same = 0;
-volatile char checked[] = "IPD,";
+uint8_t same_con = 0;
+volatile char checked[] = "IPD";
+const uint8_t connected[] = "CONNECTED";
+uint8_t con_check = 1;
 uint8_t size_checked = 3;
 volatile uint8_t size_press = 0;
 volatile uint8_t size_temp = 0;
 volatile uint8_t check_s = 0;
+
+uint8_t settings_packet[5] = {0xff, 0x01, 0, 0, 0};
+//volatile uint8_t packet_struct = 0;
+// TODO:
+volatile uint8_t type_packet = 1;
+
+void send_settings_packet(){
+	settings_packet[2] = packet_struct;
+	settings_packet[3] = 0xff ^ 0x01 ^ packet_struct;
+	//SendUART2(settings_packet);
+}
+
+uint8_t check_data(uint8_t *data){
+	if(data[0] != 0xff)
+		return 0;
+	if(data[1] != 0x04) //???
+			return 0;
+	switch(packet_struct){
+		case 0x11111101 ... 0x11111110:
+			if((data[0] ^ data[1] ^ data[2] ^ data[3] ^ \
+			   data[4] ^ data[5] ^ data[6] + 1) == data[8])
+				return 1;
+		    return 0;
+		case 0x11111001 ... 0x11111010:
+			if((data[0] ^ data[1] ^ data[2] ^ \
+				data[3] ^ data[4] + 1) == data[8])
+				return 1;
+			return 0;
+		case 0x11110101 ... 0x11110110:
+		if((data[0] ^ data[1] ^ \
+			data[2] ^ data[3] + 1) == data[8])
+			return 1;
+		return 0;
+		default:
+			return 0;
+	}
+}
+
+void transformByRaw(){
+	rec_uart_mode = WAIT;
+	type_packet = 1;
+	switch(type_packet){
+		case(1):
+				/*float temp = 0;
+				float press = 0;
+				if (transformed[0])
+					temp  = 42.5 +
+						(float) ((int16_t) ((transformed[1] << 8) | transformed[0])) / 480.;
+				if (transformed[2])
+					press = (float) (((int32_t) transformed[4] << 16)
+							| ((uint16_t) transformed[3] << 8) | (transformed[2]))
+								* 0.75006375541921 / 4096.;*/
+		sprintf(transformed, "%.2f %.2f",
+				42.5 + (float) ((int16_t) ((transformed[2] << 8) | transformed[3])) / 480.,
+				(float) (((int32_t) transformed[4] << 16)
+											| ((uint16_t) transformed[5] << 8) | (transformed[6]))
+												* 0.75006375541921 / 4096.);
+	 				//double press = 17.2;
+			//double temp = 654.2;
+			//sprintf(transformed, "%.2f %.2f", press, temp);
+
+			break;
+		case(2):
+			//double press = 17.2;
+			//sprintf(transformed, "%.2f", press);
+			//sprintf(transformed, "%.15s", transformed);
+			break;
+		case(3):
+			//double temp = 17.2;
+			//sprintf(transformed, "%.2f", temp);
+			//sprintf(transformed, "%.15s", transformed);
+			break;
+	}
+	sprintf(transformed, "%.15s", transformed);
+	rec_uart_mode = CLEAR;
+}
 
 void TIM5_IRQHandler(){
 	if (TIM_GetITStatus(TIM5, TIM_IT_Update) != RESET) {
@@ -631,6 +724,16 @@ void TIM5_IRQHandler(){
 				}else{
 					same = 0;
 				}
+				if(bufferDMAUSARTReceive[i] == connected[same_con]){
+					same_con++;
+					if(same_con == con_check){
+						rec_uart_mode = CONNECTED;
+						rec_uart_mode = VALID;
+					}
+					}else{
+						same_con = 0;
+					}
+
 				i++;
 				if(bufferSizeDMAUSARTReceive == i)
 					rec_uart_mode = NOT_VALID;
@@ -642,12 +745,21 @@ void TIM5_IRQHandler(){
 				memcpy(transformed, bufferDMAUSARTReceive[i+1], size_press);
 				memcpy(transformed[size_press], " ", 1);
 				memcpy(transformed, bufferDMAUSARTReceive[i+2+size_press], size_temp);*/
-				memcpy(transformed, bufferDMAUSARTReceive+i+6, bufferSizeDMAUSARTReceive-i-7);
-				memcpy(transformed+bufferSizeDMAUSARTReceive-i-7, bufferDMAUSARTReceive, i-size_checked);
+				//memcpy(transformed, bufferDMAUSARTReceive+6, bufferSizeDMAUSARTReceive-7);
+				if (bufferSizeDMAUSARTReceive-i-7 >= 0){
+					memcpy(transformed, bufferDMAUSARTReceive+i+6, bufferSizeDMAUSARTReceive-i-7);
+					memcpy(transformed+bufferSizeDMAUSARTReceive-i-7, bufferDMAUSARTReceive, i-size_checked);
+				}else{
+					memcpy(transformed, bufferDMAUSARTReceive+i+6-bufferSizeDMAUSARTReceive, i);
+				}//transformed[size_press + size_temp + 1]=0;
+				//transformed[bufferSizeDMAUSARTReceive-i]=0;
+				transformed[bufferSizeDMAUSARTReceive-7-size_checked] = 0;
+				//rec_uart_mode = WAIT;
+				//transformByRaw();
 
-				//transformed[size_press + size_temp + 1]=0;
-				transformed[bufferSizeDMAUSARTReceive-i]=0;
 				rec_uart_mode = CLEAR;
+
+				//SebdUART2(acknowledge_packet); // ACK
 				//rec_uart_mode = CHECK_SUM;
 			}
 			if(rec_uart_mode == CHECK_SUM){
@@ -666,6 +778,12 @@ void TIM5_IRQHandler(){
 				transformed[24]=0;
 				rec_uart_mode = CLEAR;
 			}
+			if(rec_uart_mode == CONNECTED){
+				send_settings_packet();
+				memcpy(transformed, connected, 9);
+				transformed[9]=0;
+				rec_uart_mode = CLEAR;
+			}
 			if(rec_uart_mode == CLEAR){
 				TIM_Cmd(TIM4, ENABLE);
 				TIM_ITConfig(TIM4, TIM_IT_Update, ENABLE);
@@ -681,12 +799,25 @@ void TIM5_IRQHandler(){
 				//DMA_ClearFlag(DMA1_Stream5, DMA_FLAG_TCIF5| DMA_FLAG_FEIF5|	DMA_FLAG_DMEIF5| DMA_FLAG_TEIF5| DMA_FLAG_HTIF5);
 				//USART_DMACmd(USART2, USART_DMAReq_Rx, ENABLE);
 				//DMA_DeInit(DMA1_Stream5);
-				DMA_Cmd(DMA1_Stream5, ENABLE);
 
-				//DMA_ITConfig(DMA1_Stream5, DMA_IT_TC, ENABLE);
+				//TODO: попробовать
+				//USART_DMACmd(USART2, USART_DMAReq_Tx, DISABLE);
+				//DMA_ITConfig(DMA1_Stream6, DMA_IT_TC, DISABLE);
+				//DMA_Cmd(DMA1_Stream6, DISABLE);
+				//DMA_ClearFlag(DMA1_Stream6, DMA_FLAG_TCIF6 | DMA_FLAG_FEIF6 | DMA_FLAG_DMEIF6 | \
+									DMA_FLAG_TEIF6 | DMA_FLAG_HTIF6);
+				// ЗАКОНЧИТЬ попробовать
+
+				DMA_Cmd(DMA1_Stream5, ENABLE);
+				USART_DMACmd(USART2, USART_DMAReq_Rx, ENABLE);
+				DMA_ITConfig(DMA1_Stream5, DMA_IT_TC, ENABLE);
+				DMA_ClearFlag(DMA1_Stream5, DMA_FLAG_TCIF5 | DMA_FLAG_FEIF5 | DMA_FLAG_DMEIF5 | \
+													DMA_FLAG_TEIF5 | DMA_FLAG_HTIF5);
+
 				//DMAUSART2Init_Receive();
 
 			}
+
 	}
 }
 
@@ -696,16 +827,19 @@ void DMA1_Stream5_IRQHandler(void)
   if (DMA_GetITStatus(DMA1_Stream5, DMA_IT_TCIF5) == SET)
   {
     DMA_ClearITPendingBit(DMA1_Stream5, DMA_IT_TCIF5);
-  	lcd_mode = CLR;
-  	memcpy(checked, "IPD,", 4);
-  	size_checked = 3;
-  	//TODO:::!!!!
-  	rec_uart_mode = CHECK;
-  	// !!!
-    //send_lcd_size(bufferDMAUSARTReceive, 20);
-  	TIM_Cmd(TIM5, ENABLE);
-  	TIM_ITConfig(TIM5, TIM_IT_Update, ENABLE);
-  }
+    if(rec_uart_mode == CHECK){
+		lcd_mode = CLR;
+		type_packet = 1;
+		memcpy(checked, "IPD,", 4);
+		size_checked = 3;
+		//TODO:::!!!!
+		rec_uart_mode = CHECK;
+		// !!!
+		//send_lcd_size(bufferDMAUSARTReceive, 20);
+		TIM_Cmd(TIM5, ENABLE);
+		TIM_ITConfig(TIM5, TIM_IT_Update, ENABLE);
+    }
+    }
 }
 
 void send_lcd_size(char* str, int size){
@@ -1037,11 +1171,15 @@ void ButEXTI_Init(void)
 	NVIC_Init(&NVIC_InitStruct);
 
 }
+
+uint8_t request_packet[4] = {0xff, 0x02, 0xff ^ 0x02, 0};
+
 void EXTI0_IRQHandler(void)
 {
 	if (EXTI_GetITStatus(EXTI_Line0))
 	{
 		GPIO_ToggleBits(GPIOD, GPIO_Pin_13);
+		SendDataUART2(request_packet);
 		EXTI_ClearITPendingBit(EXTI_Line0);
 	}
 }

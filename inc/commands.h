@@ -189,6 +189,8 @@
 
 #define TPLINK "AT+CWJAP=\"TP-LINK_AFF0\",\"19965099\r\n"
 
+#define IU3 "AT+CWJAP=\"IU3_Stud_WiFI\",\"IU3_Student\r\n"
+
 
 #endif /*COMMANDS_H*/
 
